@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure QR Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<style>
+  :root{--g:#0b6b3a;--bg:#f4f6f5;--bd:#d5dbd8;--tx:#1b2420}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+  header{background:var(--g);color:#fff;padding:14px 20px}
+  header h1{margin:0;font-size:1.15rem}
+  header p{margin:2px 0 0;font-size:.85rem;opacity:.85}
+  main{max-width:980px;margin:0 auto;padding:16px}
+  nav{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  nav button{padding:9px 16px;border:1px solid var(--bd);background:#fff;border-radius:8px;cursor:pointer;font-size:.95rem}
+  nav button.on{background:var(--g);color:#fff;border-color:var(--g)}
+  .panel{display:none;background:#fff;border:1px solid var(--bd);border-radius:12px;padding:16px}
+  .panel.on{display:block}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  label{display:block;font-size:.85rem;font-weight:600;margin:10px 0 4px}
+  input,select{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;font-size:.95rem;background:#fff}
+  .btn{padding:10px 16px;border:0;border-radius:8px;background:var(--g);color:#fff;font-size:.95rem;cursor:pointer;margin:12px 8px 0 0}
+  .btn.alt{background:#fff;color:var(--g);border:1px solid var(--g)}
+  canvas.qrout{max-width:100%;height:auto;border:1px solid var(--bd);border-radius:8px;image-rendering:pixelated;background:#fff}
+  .hint{font-size:.8rem;color:#55625b;margin-top:4px}
+  .verdict{margin-top:14px;padding:14px;border-radius:10px;font-weight:600}
+  .ok{background:#e3f6ea;border:1px solid #8fd1a6}
+  .warn{background:#fff4d6;border:1px solid #e6c15a}
+  .bad{background:#fde3e1;border:1px solid #e58a84}
+  .detail{font-weight:400;font-size:.88rem;margin-top:6px;line-height:1.45}
+  .note{background:#eef3f1;border-radius:8px;padding:10px 12px;font-size:.85rem;margin-bottom:12px;line-height:1.45}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="hdrName">Secure QR Generator</h1>
+  <p>Signed QR codes with a copy-detection pattern</p>
+</header>
+<main>
+<nav>
+  <button data-tab="stamp" class="on">Small QR stamp</button>
+  <button data-tab="gen">Signed card (all papers)</button>
+  <button data-tab="doc">Signed card (per document)</button>
+  <button data-tab="ver">Verify</button>
+  <button data-tab="set">Settings</button>
+</nav>
+
+<section id="stamp" class="panel on">
+  <div class="row">
+    <div>
+      <label>Text that appears when the QR is scanned (nothing else is added)</label>
+      <input id="s_text" maxlength="200" placeholder="Type exactly what should appear">
+      <div class="row" style="gap:10px">
+        <div><label>Printed size (cm)</label><input id="s_cm" type="number" min="1" max="6" step="0.25" value="1.5"></div>
+        <div><label>Position on A4</label>
+          <select id="s_pos"><option value="center">Bottom centre</option><option value="left">Bottom left</option><option value="right">Bottom right</option></select></div>
+      </div>
+      <div class="row" style="gap:10px">
+        <div><label>Copy-sensitivity: ink density (%)</label><input id="s_dens" type="number" min="20" max="100" value="36"></div>
+        <div><label>Dot size</label>
+          <select id="s_pitch"><option value="1">Finest (1 px)</option><option value="2">Fine (2 px)</option></select></div>
+        <div><label>Error correction</label>
+          <select id="s_ec"><option value="M">Medium</option><option value="L">Low (smaller code)</option><option value="Q">High</option></select></div>
+      </div>
+      <div class="hint">Lower density and finer dots make copies fail more often, but also make the original harder to scan. 100% is a normal QR that copies fine. Use the test sheet to find what works with your printer and photocopier.</div>
+      <button class="btn" id="s_make">Generate</button>
+      <button class="btn alt" id="s_dl" disabled>Download PNG</button>
+      <button class="btn alt" id="s_print" disabled>Print on A4 sheet</button>
+      <button class="btn alt" id="s_test">Print test sheet</button>
+    </div>
+    <div>
+      <canvas id="s_out" class="qrout" width="10" height="10"></canvas>
+      <div class="hint" id="s_meta"></div>
+      <div id="s_sim"></div>
+      <label style="margin-top:18px">Check a scan or photo of a printed stamp</label>
+      <input type="file" id="s_file" accept="image/*">
+      <div id="s_read"></div>
+      <canvas id="s_rcan" style="display:none"></canvas>
+    </div>
+  </div>
+</section>
+
+<section id="gen" class="panel">
+  <div class="row">
+    <div>
+      <label>Text for the QR code (shown on the card and stored in the code)</label>
+      <input id="m_text" maxlength="120" placeholder="Type whatever you want, e.g. Official document of the Physical Planning Department">
+      <div class="hint">Generate once, save the PNG, and use that same image on all your papers. Don't regenerate later: changing the text or key makes a different code.</div>
+      <label>QR width when printed (cm)</label>
+      <input id="m_cm" type="number" min="2" max="10" step="0.5" value="3.5">
+      <div class="hint">Printed at 600 dpi. Larger = easier to scan and to verify later.</div>
+      <button class="btn" id="m_make">Generate</button>
+      <button class="btn alt" id="m_dl" disabled>Download PNG</button>
+      <button class="btn alt" id="m_pr" disabled>Print at exact size</button>
+    </div>
+    <div>
+      <canvas id="m_out" class="qrout" width="10" height="10"></canvas>
+      <div class="hint" id="m_meta"></div>
+    </div>
+  </div>
+</section>
+
+<section id="doc" class="panel">
+  <div class="row">
+    <div>
+      <label>Document / item title</label>
+      <input id="d_title" placeholder="e.g. Building Permit – Plot 14, Block C">
+      <label>Reference / serial (leave blank to auto-generate)</label>
+      <input id="d_serial" placeholder="PPD-20261009-XXXX">
+      <label>Issue date</label>
+      <input id="d_date" type="date">
+      <label>QR width when printed (cm)</label>
+      <input id="d_cm" type="number" min="2" max="10" step="0.5" value="3.5">
+      <div class="hint">Each document gets its own serial, so one leaked scan can't be reused on other papers.</div>
+      <button class="btn" id="d_make">Generate</button>
+      <button class="btn alt" id="d_dl" disabled>Download PNG</button>
+      <button class="btn alt" id="d_pr" disabled>Print at exact size</button>
+    </div>
+    <div>
+      <canvas id="d_out" class="qrout" width="10" height="10"></canvas>
+      <div class="hint" id="d_meta"></div>
+    </div>
+  </div>
+</section>
+
+<section id="ver" class="panel">
+  <div class="note">Upload a <b>flat, high-resolution scan (600 dpi, no filters or auto-enhance)</b> or a sharp close-up photo of the printed code.
+  The app checks the digital signature and the fine copy-detection pattern under the QR. A photocopy loses that fine pattern.</div>
+  <input type="file" id="file" accept="image/*">
+  <div id="vout"></div>
+  <canvas id="vcan" style="display:none"></canvas>
+</section>
+
+<section id="set" class="panel">
+  <div class="row">
+    <div>
+      <label>Department name (printed on every code)</label>
+      <input id="dept">
+      <label>Secret key</label>
+      <input id="secret">
+      <div class="hint">Needed to sign and to verify. Keep it private. Anyone verifying codes must use the same key on their device.</div>
+      <button class="btn alt" id="newkey">Generate new random key</button>
+    </div>
+    <div>
+      <label>"Original" threshold (copy-pattern match %)</label>
+      <input id="thOk" type="number" min="50" max="100" value="80">
+      <label>"Likely copy" below (%)</label>
+      <input id="thBad" type="number" min="50" max="100" value="65">
+      <div class="hint">Calibrate: verify a scan of an original, then a photocopy of it, and set the thresholds between the two scores.</div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:v }catch(e){ return d } },
+  set(k,v){ try{ localStorage.setItem(k,v) }catch(e){} }
+};
+const enc = s => new TextEncoder().encode(s);
+const hex = buf => [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+const clean = s => (s||'').replace(/[|\n\r]/g,' ').trim();
+
+/* ---------- settings ---------- */
+function randKey(){ const a=new Uint8Array(24); crypto.getRandomValues(a); return hex(a); }
+$('dept').value   = store.get('dept','Physical Planning Department – Duayaw Nkwanta');
+$('secret').value = store.get('secret','') || (()=>{ const k=randKey(); store.set('secret',k); return k })();
+$('thOk').value   = store.get('thOk','80');
+$('thBad').value  = store.get('thBad','65');
+function refreshHeader(){ $('hdrName').textContent = $('dept').value || 'Secure QR Generator'; }
+['dept','secret','thOk','thBad'].forEach(id=>$(id).addEventListener('input',()=>{ store.set(id,$(id).value); refreshHeader(); }));
+$('newkey').onclick=()=>{ if(confirm('A new key makes ALL previously printed codes fail verification. Continue?')){ $('secret').value=randKey(); store.set('secret',$('secret').value);} };
+refreshHeader();
+$('d_date').valueAsDate = new Date();
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id===b.dataset.tab));
+});
+
+/* ---------- crypto helpers ---------- */
+async function hmac(secret,msg){
+  const k = await crypto.subtle.importKey('raw',enc(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  return hex(await crypto.subtle.sign('HMAC',k,enc(msg))).slice(0,16);
+}
+function sfc32(a,b,c,d){
+  return function(){
+    a|=0;b|=0;c|=0;d|=0;
+    let t=(a+b|0)+d|0; d=d+1|0; a=b^b>>>9; b=c+(c<<3)|0; c=(c<<21|c>>>11); c=c+t|0;
+    return t>>>0;
+  };
+}
+async function cdpBits(secret,serial,cols,rows){
+  const h = new DataView(await crypto.subtle.digest('SHA-256',enc('cdp|'+secret+'|'+serial)));
+  const r = sfc32(h.getUint32(0),h.getUint32(4),h.getUint32(8),h.getUint32(12));
+  for(let i=0;i<16;i++) r();
+  const bits = new Uint8Array(cols*rows);
+  for(let i=0;i<bits.length;i++) bits[i]=(r()>>>16)&1;
+  return bits;
+}
+function makeQR(text){
+  const q = qrcode(0,'M'); q.addData(text); q.make(); return q;
+}
+
+/* ---------- card drawing ---------- */
+function fit(ctx,text,maxW,startPx,weight){
+  let px=startPx;
+  do{ ctx.font=`${weight} ${px}px system-ui, Arial, sans-serif`; px-=1; }
+  while(ctx.measureText(text).width>maxW && px>8);
+}
+async function drawCard(f,P){
+  const payload = ['PPD1',f.dept,f.serial,f.date,f.title].join('|');
+  const sig = await hmac(f.secret,payload);
+  const text = payload+'|'+sig;
+  const q = makeQR(text), N=q.getModuleCount();
+  const cols=4*N, rows=2*N, cell=P/4;
+  const W=(N+8)*P, qrTop=7*P, cdpTop=qrTop+(N+2)*P, H=cdpTop+(N/2)*P+6*P;
+  const c=document.createElement('canvas'); c.width=Math.round(W); c.height=Math.round(H);
+  const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+  x.fillStyle='#000'; x.textAlign='center'; x.textBaseline='alphabetic';
+  fit(x,f.dept,W-4*P,2.2*P,'700'); x.fillText(f.dept,W/2,2.4*P);
+  fit(x,f.title||'Official document',W-4*P,1.6*P,'600'); x.fillText(f.title||'Official document',W/2,4.4*P);
+  const refLine = f.date ? `Ref: ${f.serial}   •   ${f.date}` : 'Official verification code';
+  fit(x,refLine,W-4*P,1.3*P,'400'); x.fillText(refLine,W/2,6*P);
+  for(let r=0;r<N;r++)for(let k=0;k<N;k++) if(q.isDark(r,k)) x.fillRect((4+k)*P,qrTop+r*P,P,P);
+  const bits=await cdpBits(f.secret,f.serial,cols,rows);
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++) if(bits[j*cols+i]) x.fillRect(4*P+i*cell,cdpTop+j*cell,cell,cell);
+  x.fillStyle='#000'; fit(x,'Verify with the official checker • Photocopies are invalid',W-4*P,1.1*P,'400');
+  x.fillText('Verify with the official checker • Photocopies are invalid',W/2,H-2*P);
+  return {canvas:c,N,text};
+}
+
+/* ---------- generate (two tabs share one engine) ---------- */
+function setupGen(p, getFields){
+  let last=null;
+  const el = id => $(p+id);
+  el('make').onclick = async () => {
+    const dept=clean($('dept').value), secret=$('secret').value;
+    if(!dept||!secret){ alert('Set a department name and secret key in Settings.'); return; }
+    const f = Object.assign({dept,secret}, getFields());
+    if(!f.serial){ const a=new Uint8Array(3); crypto.getRandomValues(a); f.serial='PPD-'+f.date.replace(/-/g,'')+'-'+hex(a).toUpperCase(); $('d_serial').value=f.serial; }
+    // provisional pass to learn N, then size modules for 600 dpi at the requested width
+    const probe=makeQR(['PPD1',f.dept,f.serial,f.date,f.title].join('|')+'|0000000000000000').getModuleCount();
+    const cm=parseFloat(el('cm').value)||3.5;
+    let P=Math.round((cm/2.54*600/probe)/4)*4; P=Math.max(8,P);
+    const res=await drawCard(f,P);
+    const out=el('out'); out.width=res.canvas.width; out.height=res.canvas.height;
+    out.getContext('2d').drawImage(res.canvas,0,0);
+    last={f,P,N:res.N,cm,url:res.canvas.toDataURL('image/png')};
+    el('dl').disabled=el('pr').disabled=false;
+    el('meta').textContent=`${res.N}×${res.N} modules • ${P}px per module • card ${(cm*(res.N+8)/res.N).toFixed(1)} cm wide when printed at 600 dpi`;
+  };
+  el('dl').onclick=()=>{ const a=document.createElement('a'); a.href=last.url; a.download=`${last.f.serial}.png`; a.click(); };
+  el('pr').onclick=()=>{
+    const w=window.open('','_blank'); const cmW=(last.cm*(last.N+8)/last.N).toFixed(3);
+    w.document.write(`<title>Print</title><style>@page{margin:10mm}body{margin:0}img{width:${cmW}cm;image-rendering:pixelated}</style><img src="${last.url}" onload="print()">`);
+    w.document.close();
+  };
+}
+// Tab 1: one code for all papers, with text you type
+$('m_text').value = store.get('m_text','Official document');
+$('m_text').addEventListener('input',()=>store.set('m_text',$('m_text').value));
+setupGen('m_', ()=>({ serial:'PPD-MASTER', date:'', title:clean($('m_text').value) }));
+// Tab 2: unique code per document
+setupGen('d_', ()=>({ serial:clean($('d_serial').value), date:$('d_date').value||new Date().toISOString().slice(0,10), title:clean($('d_title').value) }));
+
+
+/*PURE_START*/
+const BAYER4=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+function renderStamp(q,P,quiet,pitch,density){
+  const N=q.getModuleCount(), S=(N+2*quiet)*P;
+  const g=new Uint8Array(S*S).fill(255);
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    if(!q.isDark(r,c)) continue;
+    const x0=(quiet+c)*P, y0=(quiet+r)*P;
+    for(let y=y0;y<y0+P;y++)for(let x=x0;x<x0+P;x++){
+      const t=(BAYER4[(((y/pitch)|0)&3)*4+(((x/pitch)|0)&3)]+0.5)/16;
+      if(t<density) g[y*S+x]=0;
+    }
+  }
+  return {w:S,h:S,g};
+}
+function boxDown(g,w,h,f){
+  const nw=Math.floor(w/f), nh=Math.floor(h/f), o=new Float32Array(nw*nh);
+  for(let oy=0;oy<nh;oy++){
+    const y0=Math.floor(oy*f), y1=Math.max(y0+1,Math.floor((oy+1)*f));
+    for(let ox=0;ox<nw;ox++){
+      const x0=Math.floor(ox*f), x1=Math.max(x0+1,Math.floor((ox+1)*f));
+      let s=0,n=0;
+      for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){ s+=g[y*w+x]; n++; }
+      o[oy*nw+ox]=s/n;
+    }
+  }
+  return {w:nw,h:nh,g:o};
+}
+function blur(img,sigma){
+  if(sigma<=0) return img;
+  const {w,h,g}=img, R=Math.ceil(sigma*3), k=[]; let ks=0;
+  for(let i=-R;i<=R;i++){ const v=Math.exp(-i*i/(2*sigma*sigma)); k.push(v); ks+=v; }
+  for(let i=0;i<k.length;i++) k[i]/=ks;
+  const t=new Float32Array(w*h), o=new Float32Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){ let s=0; for(let i=-R;i<=R;i++){ const xx=Math.min(w-1,Math.max(0,x+i)); s+=g[y*w+xx]*k[i+R]; } t[y*w+x]=s; }
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){ let s=0; for(let i=-R;i<=R;i++){ const yy=Math.min(h-1,Math.max(0,y+i)); s+=t[yy*w+x]*k[i+R]; } o[y*w+x]=s; }
+  return {w,h,g:o};
+}
+// roughly what a phone sees: 'mpx' pixels per module, slightly soft
+function cameraView(img,P,mpx){ return blur(boxDown(img.g,img.w,img.h,Math.max(1,P/mpx)),0.6); }
+// a rough model of a photocopier: scan at 300 dpi, soft optics, exposure/contrast, binarise, reprint with toner spread
+function simulateCopy(img,o){
+  const s=blur(boxDown(img.g,img.w,img.h,2),o.scanBlur), w=s.w, h=s.h, W=w*2, H=h*2;
+  const out=new Uint8Array(W*H).fill(255);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const v=(s.g[(y>>1)*w+(x>>1)]/255-o.mid)*o.k+0.5;
+    if(v<0.5) out[y*W+x]=0;
+  }
+  if(o.spread<=0) return {w:W,h:H,g:out};
+  const o2=new Uint8Array(W*H).fill(255), r=o.spread;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    let ink=false;
+    for(let dy=-r;dy<=r&&!ink;dy++)for(let dx=-r;dx<=r;dx++){
+      const xx=x+dx,yy=y+dy;
+      if(xx>=0&&yy>=0&&xx<W&&yy<H&&out[yy*W+xx]===0){ ink=true; break; }
+    }
+    if(ink) o2[y*W+x]=0;
+  }
+  return {w:W,h:H,g:o2};
+}
+function toRGBA(img){
+  const d=new Uint8ClampedArray(img.w*img.h*4);
+  for(let i=0;i<img.w*img.h;i++){ const v=img.g[i]; d[i*4]=d[i*4+1]=d[i*4+2]=v; d[i*4+3]=255; }
+  return d;
+}
+/*PURE_END*/
+
+/* ---------- plain stamp: only the typed text, tiny, copy-sensitive ---------- */
+if(qrcode.stringToBytesFuncs&&qrcode.stringToBytesFuncs['UTF-8']) qrcode.stringToBytes=qrcode.stringToBytesFuncs['UTF-8'];
+$('s_text').value=store.get('s_text','Official document of the Physical Planning Department');
+['s_text','s_cm','s_dens','s_pitch','s_ec','s_pos'].forEach(id=>{ const v=store.get(id,null); if(v!==null&&id!=='s_text') $(id).value=v; $(id).addEventListener('input',()=>store.set(id,$(id).value)); });
+function sParams(){ return { text:$('s_text').value, cm:parseFloat($('s_cm').value)||1.5, pitch:+$('s_pitch').value, dens:Math.max(0.15,Math.min(1,(+$('s_dens').value||36)/100)), ec:$('s_ec').value }; }
+function sBuild(p,pitch,dens){
+  const q=qrcode(0,p.ec); q.addData(p.text); q.make();
+  const N=q.getModuleCount(), P=Math.max(4,Math.round(p.cm/2.54*600/N));
+  return {N,P,img:renderStamp(q,P,4,pitch,dens)};
+}
+function sCanvas(img){
+  const c=document.createElement('canvas'); c.width=img.w; c.height=img.h;
+  const x=c.getContext('2d'), id=x.createImageData(img.w,img.h);
+  id.data.set(toRGBA(img)); x.putImageData(id,0,0); return c;
+}
+function sReads(img,text){
+  const d=jsQR(toRGBA(img),img.w,img.h,{inversionAttempts:'dontInvert'});
+  return !!d && d.data===text;
+}
+let sLast=null;
+$('s_make').onclick=()=>{
+  const p=sParams();
+  if(!p.text.trim()){ alert('Type the text for the QR code.'); return; }
+  const b=sBuild(p,p.pitch,p.dens), c=sCanvas(b.img), out=$('s_out');
+  out.width=c.width; out.height=c.height; out.getContext('2d').drawImage(c,0,0);
+  sLast={p,N:b.N,P:b.P,url:c.toDataURL('image/png')};
+  $('s_dl').disabled=$('s_print').disabled=false;
+  const qrCm=p.cm, cardCm=(p.cm*(b.N+8)/b.N);
+  $('s_meta').textContent=`${b.N}×${b.N} modules • ${(qrCm*10/b.N).toFixed(2)} mm per module • image ${cardCm.toFixed(2)} cm wide including the blank border`;
+  $('s_sim').textContent='Running a quick simulated scan and photocopy test…';
+  setTimeout(()=>{
+    const okN=[6,8,10].filter(m=>sReads(cameraView(b.img,b.P,m),p.text)).length;
+    const cops=[]; for(const mid of [.45,.55,.65,.75]) for(const k of [1.5,3]) for(const spread of [0,1]) cops.push({scanBlur:.7,mid,k,spread});
+    let fails=0; cops.forEach(o=>{ if(!sReads(cameraView(simulateCopy(b.img,o),b.P,8),p.text)) fails++; });
+    const good=okN>=2&&fails>=cops.length/2, d=document.createElement('div');
+    d.className='verdict '+(okN<2?'bad':good?'ok':'warn');
+    d.textContent = okN<2 ? 'Simulation: the original is hard to read at this size/density. Raise the density or size.'
+      : good ? `Simulation: original reads; ${fails} of ${cops.length} simulated photocopies lose the code.`
+      : `Simulation: original reads, but only ${fails} of ${cops.length} simulated photocopies lose the code. Try a lower density.`;
+    const n=document.createElement('div'); n.className='detail'; n.textContent='This is only an estimate. Real printers and copiers differ, so confirm with the test sheet.'; d.appendChild(n);
+    $('s_sim').replaceChildren(d);
+  },30);
+};
+$('s_dl').onclick=()=>{ const a=document.createElement('a'); a.href=sLast.url; a.download='qr-stamp.png'; a.click(); };
+$('s_print').onclick=()=>{
+  const cmW=(sLast.p.cm*(sLast.N+8)/sLast.N).toFixed(3), pos=$('s_pos').value;
+  const side=pos==='left'?'left:10mm':pos==='right'?'right:10mm':'left:50%;transform:translateX(-50%)';
+  const w=window.open('','_blank');
+  w.document.write(`<!doctype html><title>Print QR stamp</title><style>@page{size:A4;margin:0}html,body{margin:0;height:100%}img{position:absolute;bottom:8mm;${side};width:${cmW}cm;image-rendering:pixelated}</style><img src="${sLast.url}" onload="setTimeout(function(){print()},200)">`);
+  w.document.close();
+};
+$('s_test').onclick=()=>{
+  const p=sParams();
+  if(!p.text.trim()){ alert('Type the text for the QR code first.'); return; }
+  const V=[[1,.25],[1,.30],[1,.36],[1,.45],[2,.40],[2,.50],[2,.65],[1,1]];
+  const cmW=(p.cm*(sBuild(p,1,1).N+8)/sBuild(p,1,1).N).toFixed(3);
+  const cells=V.map((v,i)=>{ const b=sBuild(p,v[0],v[1]), url=sCanvas(b.img).toDataURL('image/png');
+    return `<figure><img src="${url}" style="width:${cmW}cm;image-rendering:pixelated"><figcaption>${String.fromCharCode(65+i)}: ${v[0]}px dots, ${Math.round(v[1]*100)}%${v[1]===1?' (normal QR)':''}</figcaption></figure>`; }).join('');
+  const w=window.open('','_blank');
+  w.document.write(`<!doctype html><title>QR test sheet</title><style>@page{size:A4;margin:12mm}body{font:12px system-ui,sans-serif}figure{display:inline-block;margin:0 10mm 8mm 0;text-align:center}figcaption{font-size:11px}</style><h3>QR copy-test sheet</h3><p>Print at 100% / actual size on your real printer and paper. Scan each stamp with a phone and note which ones read. Then photocopy this sheet and scan the copies. Choose the lowest density that reads on the original but fails on the copy. Letter H is a normal QR for comparison.</p>${cells}<script>window.onload=function(){setTimeout(function(){print()},300)}<\/script>`);
+  w.document.close();
+};
+$('s_file').onchange=async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const img=new Image(); img.src=URL.createObjectURL(file);
+  const box=$('s_read'), show=(cls,t)=>{ const d=document.createElement('div'); d.className='verdict '+cls; d.textContent=t; box.replaceChildren(d); };
+  try{ await img.decode(); }catch(err){ show('bad','Could not read that image.'); return; }
+  const sc=Math.min(1,5000/Math.max(img.naturalWidth,img.naturalHeight)), c=$('s_rcan');
+  c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc);
+  const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,c.width,c.height);
+  const id=x.getImageData(0,0,c.width,c.height), r=jsQR(id.data,c.width,c.height,{inversionAttempts:'dontInvert'});
+  if(r) show('ok','Reads: '+r.data); else show('bad','Nothing could be read. This is what a photocopy should do (or the photo is too blurry).');
+};
+
+/* ---------- verify ---------- */
+function verdict(cls,title,lines){
+  const d=document.createElement('div'); d.className='verdict '+cls;
+  const t=document.createElement('div'); t.textContent=title; d.appendChild(t);
+  lines.forEach(l=>{ const p=document.createElement('div'); p.className='detail'; p.textContent=l; d.appendChild(p); });
+  $('vout').replaceChildren(d);
+}
+$('file').onchange=async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const img=new Image(); img.src=URL.createObjectURL(file);
+  try{ await img.decode(); }catch(err){ verdict('bad','Could not read that image',[]); return; }
+  const s=Math.min(1,5000/Math.max(img.naturalWidth,img.naturalHeight));
+  const c=$('vcan'); c.width=Math.round(img.naturalWidth*s); c.height=Math.round(img.naturalHeight*s);
+  const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,c.width,c.height);
+  const id=x.getImageData(0,0,c.width,c.height);
+  const code=jsQR(id.data,c.width,c.height,{inversionAttempts:'dontInvert'});
+  if(!code){ verdict('bad','No QR code found',['Use a sharper, flatter, well-lit image of the whole card.']); return; }
+
+  const parts=code.data.split('|');
+  if(parts.length!==6||parts[0]!=='PPD1'){ verdict('bad','NOT AN OFFICIAL CODE',['This QR was not generated by this system.','Content: '+code.data.slice(0,120)]); return; }
+  const [,dept,serial,date,title,sig]=parts;
+  const expect=await hmac($('secret').value,parts.slice(0,5).join('|'));
+  if(expect!==sig){ verdict('bad','INVALID SIGNATURE – possible forgery',['The details were altered, or the code was made with a different key.',`Claimed: ${dept} • ${serial}`]); return; }
+
+  // scan counter (this device only)
+  let log={}; try{ log=JSON.parse(store.get('log','{}')); }catch(err){}
+  log[serial]=(log[serial]||0)+1; store.set('log',JSON.stringify(log));
+
+  // copy-detection pattern
+  const N=makeQR(code.data).getModuleCount(), cols=4*N, rows=2*N;
+  const L=code.location, TL=L.topLeftFinderPattern, TR=L.topRightFinderPattern, BL=L.bottomLeftFinderPattern;
+  const modPx=Math.hypot(TR.x-TL.x,TR.y-TL.y)/(N-7);
+  const cellPx=modPx/4;
+  const bits=await cdpBits($('secret').value,serial,cols,rows);
+  const gray=new Float32Array(cols*rows); let inside=0;
+  const gAt=(px,py)=>{ px=Math.round(px);py=Math.round(py); if(px<0||py<0||px>=c.width||py>=c.height) return null; const i=(py*c.width+px)*4; return .299*id.data[i]+.587*id.data[i+1]+.114*id.data[i+2]; };
+  const r=Math.max(0,Math.floor(cellPx*0.25));
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){
+    const u=(i+.5)/4, v=N+2+(j+.5)/4;
+    const px=TL.x+(u-3.5)/(N-7)*(TR.x-TL.x)+(v-3.5)/(N-7)*(BL.x-TL.x);
+    const py=TL.y+(u-3.5)/(N-7)*(TR.y-TL.y)+(v-3.5)/(N-7)*(BL.y-TL.y);
+    let sum=0,n=0;
+    for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){ const g=gAt(px+dx,py+dy); if(g!==null){sum+=g;n++;} }
+    if(n){ gray[j*cols+i]=sum/n; inside++; } else gray[j*cols+i]=NaN;
+  }
+  const header=[`${dept}`,`Ref ${serial}${date?' • '+date:''}`,title?`Title: ${title}`:'', `Checked ${log[serial]} time(s) on this device`].filter(Boolean);
+  if(inside<cols*rows*0.95){ verdict('warn','Signature valid, but the copy-detection area is missing',['Include the whole card (QR plus the fine dotted pattern below it) in the image.',...header]); return; }
+  if(cellPx<2.5){ verdict('warn','Signature valid, but the image is too low-resolution to check for copying',['Re-scan flat at 600 dpi, or take a sharper close-up photo.',...header]); return; }
+  const vals=[...gray].sort((a,b)=>a-b), thr=vals[vals.length>>1];
+  let match=0; for(let k=0;k<gray.length;k++) if((gray[k]<thr?1:0)===bits[k]) match++;
+  const score=Math.round(100*match/gray.length);
+  const ok=+$('thOk').value, bad=+$('thBad').value;
+  const detail=[`Copy-pattern match: ${score}%  (random noise ≈ 50%, genuine print is usually well above ${ok}%)`,...header];
+  if(score>=ok) verdict('ok','GENUINE – signature valid, copy pattern intact',detail);
+  else if(score>=bad) verdict('warn','SUSPICIOUS – signature valid but the copy pattern is degraded',[...detail,'Re-scan at higher quality; if it stays low, treat it as a possible photocopy.']);
+  else verdict('bad','LIKELY A PHOTOCOPY – valid signature but copy pattern lost',[...detail,'The QR text is real, but this physical item does not look like an original print.']);
+};
+</script>
+</body>
+</html>
